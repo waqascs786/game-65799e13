@@ -89,6 +89,12 @@ class _GameEngineState extends State<GameEngine> with SingleTickerProviderStateM
   List<String> _fillSequenceAvailable = [];
   int _lastFillSequenceLevelIndex = -1;
 
+  Set<int> _ooOddPositions = {};
+  Set<int> _ooFoundPositions = {};
+  int _ooCount = 3;
+  int _ooGridSize = 10;
+  int _lastOoLevelIndex = -1;
+
   final TextEditingController _fillController = TextEditingController();
 
   static const List<Color> _wsColors = [
@@ -154,6 +160,9 @@ class _GameEngineState extends State<GameEngine> with SingleTickerProviderStateM
     _lastClassifyLevelIndex = -1;
     _fillSequenceAvailable = [];
     _lastFillSequenceLevelIndex = -1;
+    _ooOddPositions = {};
+    _ooFoundPositions = {};
+    _lastOoLevelIndex = -1;
     if (_screen == _Screen.playing && !_hasPacks) {
       _internalLevelIndex = widget.currentLevel;
     }
@@ -237,6 +246,9 @@ class _GameEngineState extends State<GameEngine> with SingleTickerProviderStateM
         return _buildCompleteShapeScreen(level);
       case 'fillSequence':
         return _buildFillSequenceScreen(level);
+      case 'oddOneOut1':
+      case 'oddOneOut2':
+        return _buildOddOneOutScreen(level);
       default:
         return _buildLetterTapScreen(level);
     }
@@ -2176,6 +2188,139 @@ class _GameEngineState extends State<GameEngine> with SingleTickerProviderStateM
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _initOddOneOut(GameLevel level) {
+    final isEmoji = level.questionType == 'oddOneOut2';
+    final emojis = level.emojis;
+    final options = level.options;
+    _ooCount = int.tryParse(options.isNotEmpty ? options[0] : '3') ?? 3;
+    _ooGridSize = 10;
+    _ooOddPositions = {};
+    _ooFoundPositions = {};
+    while (_ooOddPositions.length < _ooCount) {
+      _ooOddPositions.add(_random.nextInt(_ooGridSize * _ooGridSize));
+    }
+    _lastOoLevelIndex = _internalLevelIndex;
+  }
+
+  Widget _buildOddOneOutScreen(GameLevel level) {
+    if (_lastOoLevelIndex != _internalLevelIndex || _ooOddPositions.isEmpty) {
+      _initOddOneOut(level);
+    }
+    final isEmoji = level.questionType == 'oddOneOut2';
+    final emojis = level.emojis;
+    final mainChar = isEmoji ? (emojis.isNotEmpty ? emojis[0] : '📷') : (emojis.isNotEmpty ? emojis[0] : 'F');
+    final oddChar = isEmoji ? (emojis.length > 1 ? emojis[1] : '🎨') : (level.answer.isNotEmpty ? level.answer : 'E');
+    final allFound = _ooFoundPositions.length >= _ooCount;
+
+    return SafeArea(
+      child: Column(
+        children: [
+          _buildHeader(),
+          _buildQuestion(level),
+          const SizedBox(height: 4),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [Colors.teal.shade700, Colors.cyan.shade400]),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(oddChar, style: TextStyle(fontSize: isEmoji ? 22 : 20, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Text(': ${_ooFoundPositions.length}/$_ooCount',
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: GridView.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: _ooGridSize,
+                  mainAxisSpacing: 1,
+                  crossAxisSpacing: 1,
+                ),
+                itemCount: _ooGridSize * _ooGridSize,
+                itemBuilder: (context, index) {
+                  final isOdd = _ooOddPositions.contains(index);
+                  final isFound = _ooFoundPositions.contains(index);
+                  return GestureDetector(
+                    onTap: isFound ? null : () {
+                      _playSound();
+                      if (isOdd) {
+                        setState(() => _ooFoundPositions.add(index));
+                        if (_ooFoundPositions.length >= _ooCount) {
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            if (mounted) {
+                              _animController.forward(from: 0);
+                              setState(() => _showComplete = true);
+                            }
+                          });
+                        }
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Not the odd one!'), backgroundColor: Colors.red, duration: Duration(seconds: 1)),
+                        );
+                      }
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      decoration: BoxDecoration(
+                        color: isFound
+                            ? Colors.green.withOpacity(0.25)
+                            : const Color(0xFF1A237E).withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(4),
+                        border: isFound
+                            ? Border.all(color: Colors.green, width: 2)
+                            : Border.all(color: Colors.white.withOpacity(0.1), width: 0.5),
+                      ),
+                      child: Center(
+                        child: Text(
+                          isOdd ? oddChar : mainChar,
+                          style: TextStyle(
+                            fontSize: isEmoji ? 18 : 16,
+                            fontWeight: isFound ? FontWeight.bold : FontWeight.normal,
+                            color: isFound ? Colors.green : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: allFound
+                    ? () {
+                        _playSound();
+                        _animController.forward(from: 0);
+                        setState(() => _showComplete = true);
+                      }
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _getColor('primary'),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(allFound ? 'Complete!' : 'Found ${_ooFoundPositions.length}/$_ooCount',
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
